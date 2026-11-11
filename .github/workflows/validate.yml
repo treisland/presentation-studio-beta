@@ -1,0 +1,15 @@
+name: Validate deployment configuration
+on: [pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  validate:
+    name: validate deployment configuration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - run: node --check scripts/site.mjs
+      - run: node --check scripts/preview-site.mjs
+      - run: python -m unittest discover -s tests -p test_preview.py
