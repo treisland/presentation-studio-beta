@@ -27,6 +27,15 @@ jobs:
   prepare:
     if: github.ref == 'refs/heads/main' && github.repository == 'treisland/presentation-studio-beta'
     runs-on: ubuntu-latest
+    # GitHub exposes draft transfer bundles only to push-capable tokens.
+    # This is confined to trusted preparation in the beta repository; no
+    # source-repository write permission or publishing credential is granted.
+    permissions:
+      contents: write
+    # GitHub requires push-level access to discover private draft transfers.
+    # This token is scoped only to this deployment repository, never source.
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
