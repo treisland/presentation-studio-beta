@@ -1,0 +1,68 @@
+# Install in .github/workflows/pages.yml of treisland/presentation-studio-beta.
+# Copy scripts/site.mjs, scripts/delivery.mjs, scripts/preview-site.mjs and
+# scripts/unpack-preview.py alongside it. Only trusted deployment code executes.
+name: Deploy isolated beta site
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        type: choice
+        options: [review, release]
+        required: true
+      run_id:
+        description: Successful source Validate and build run ID (review only)
+        type: string
+      head_sha:
+        description: Full owner PR head SHA (review only)
+        type: string
+      tag:
+        description: Published beta or RC tag (release only)
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: beta-pages
+  cancel-in-progress: false
+jobs:
+  prepare:
+    if: github.ref == 'refs/heads/main' && github.repository == 'treisland/presentation-studio-beta'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - name: Verify isolated review artifact
+        if: inputs.mode == 'review'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.run_id }}
+          HEAD_SHA: ${{ inputs.head_sha }}
+        run: |
+          node scripts/preview-site.mjs "$RUN_ID" "$HEAD_SHA"
+          python scripts/unpack-preview.py test-results/review-site.zip site "$HEAD_SHA"
+      - name: Verify published beta or RC
+        if: inputs.mode == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          CURRENT_SITE_URL: https://beta.pres-studio.com/
+        run: node scripts/site.mjs release "$RELEASE_TAG" beta
+      - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
+        with:
+          path: site/
+  deploy:
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
