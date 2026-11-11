@@ -5,7 +5,7 @@ const repository='treisland/presentation-studio';
 const [runId,sha]=process.argv.slice(2);
 if(!/^\d+$/.test(runId)||!/^[a-f0-9]{40}$/.test(sha||''))throw Error('Expected CI run ID and full source head SHA.');
 const headers={Accept:'application/vnd.github+json',...(process.env.GH_TOKEN?{Authorization:'Bearer '+process.env.GH_TOKEN}:{})};
-async function api(path){const r=await fetch('https://api.github.com/repos/'+repository+'/'+path,{headers,signal:AbortSignal.timeout(30000)});if(!r.ok)throw Error('GitHub API returned '+r.status);return r.json();}
+async function api(path,repo=repository){const r=await fetch('https://api.github.com/repos/'+repo+'/'+path,{headers:repo===repository?{Accept:headers.Accept}:headers,signal:AbortSignal.timeout(30000)});if(!r.ok)throw Error('GitHub API returned '+r.status);return r.json();}
 const run=await api('actions/runs/'+runId);
 if(run.path!=='.github/workflows/validate.yml'||run.event!=='pull_request'||run.status!=='completed'||run.conclusion!=='success'||run.head_sha!==sha||run.head_repository?.full_name!==repository)throw Error('Preview needs successful same-repository PR validation at the supplied head.');
 const prs=await api('commits/'+sha+'/pulls?per_page=100');
@@ -19,7 +19,22 @@ const listing=await api('actions/runs/'+runId+'/artifacts?per_page=100');
 const artifacts=listing.artifacts.filter(a=>a.name==='review-site'&&!a.expired);
 if(artifacts.length!==1||!/^sha256:[a-f0-9]{64}$/.test(artifacts[0].digest||''))throw Error('Expected one complete digested review-site artifact.');
 const asset=artifacts[0];if(asset.size_in_bytes>12000000)throw Error('Preview artifact exceeds limit.');
-const response=await fetch(asset.archive_download_url,{headers,signal:AbortSignal.timeout(60000)});if(!response.ok)throw Error('Preview download returned '+response.status);
+let downloadURL=asset.archive_download_url,downloadHeaders=headers;
+if(process.env.PREVIEW_TRANSFER_TAG){
+  const transferTag=process.env.PREVIEW_TRANSFER_TAG;
+  if(transferTag!=='review-'+sha)throw Error('Unexpected preview transfer identity.');
+  // Source Actions artifacts need source access. A maintainer transfers the
+  // exact ZIP with their existing local gh authentication; the deployment
+  // token downloads its own repository's bundle and rechecks the source digest.
+  const betaRepository='treisland/presentation-studio-beta';
+  const releases=await api('releases?per_page=100',betaRepository);
+  const transfer=releases.find(r=>r.tag_name===transferTag&&r.draft);
+  if(!transfer)throw Error('Stage the CI artifact in a same-repository draft review transfer first.');
+  const matching=transfer.assets.filter(a=>a.name==='review-site.zip'&&a.state==='uploaded'&&a.digest===asset.digest);
+  if(transfer.assets.length!==1||matching.length!==1)throw Error('Review transfer must contain the exact source CI archive.');
+  downloadURL=matching[0].url;downloadHeaders={...headers,Accept:'application/octet-stream'};
+}
+const response=await fetch(downloadURL,{headers:downloadHeaders,signal:AbortSignal.timeout(60000)});if(!response.ok)throw Error('Preview download returned '+response.status);
 const chunks=[];let size=0;for await(const chunk of response.body){size+=chunk.length;if(size>12000000)throw Error('Preview exceeds limit.');chunks.push(chunk);}
 const bytes=Buffer.concat(chunks);if('sha256:'+hash(bytes)!==asset.digest)throw Error('Preview ZIP digest mismatch.');
 await mkdir('test-results',{recursive:true});await writeFile('test-results/review-site.zip',bytes);

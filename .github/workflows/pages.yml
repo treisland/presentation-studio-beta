@@ -40,6 +40,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RUN_ID: ${{ inputs.run_id }}
           HEAD_SHA: ${{ inputs.head_sha }}
+          PREVIEW_TRANSFER_TAG: review-${{ inputs.head_sha }}
         run: |
           node scripts/preview-site.mjs "$RUN_ID" "$HEAD_SHA"
           python scripts/unpack-preview.py test-results/review-site.zip site "$HEAD_SHA"
