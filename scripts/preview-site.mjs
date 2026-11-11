@@ -20,19 +20,17 @@ const artifacts=listing.artifacts.filter(a=>a.name==='review-site'&&!a.expired);
 if(artifacts.length!==1||!/^sha256:[a-f0-9]{64}$/.test(artifacts[0].digest||''))throw Error('Expected one complete digested review-site artifact.');
 const asset=artifacts[0];if(asset.size_in_bytes>12000000)throw Error('Preview artifact exceeds limit.');
 let downloadURL=asset.archive_download_url,downloadHeaders=headers;
-if(process.env.PREVIEW_TRANSFER_TAG){
-  const transferTag=process.env.PREVIEW_TRANSFER_TAG;
-  if(transferTag!=='review-'+sha)throw Error('Unexpected preview transfer identity.');
+if(process.env.PREVIEW_TRANSFER_COMMIT){
+  const transferCommit=process.env.PREVIEW_TRANSFER_COMMIT;
+  if(!/^[a-f0-9]{40}$/.test(transferCommit))throw Error('Expected immutable preview transfer commit.');
   // Source Actions artifacts need source access. A maintainer transfers the
-  // exact ZIP with their existing local gh authentication; the deployment
-  // token downloads its own repository's bundle and rechecks the source digest.
+  // exact ZIP through a reviewed deployment-repository commit using local gh
+  // authentication. CI stays read-only and rechecks the original source digest.
   const betaRepository='treisland/presentation-studio-beta';
-  const releases=await api('releases?per_page=100',betaRepository);
-  const transfer=releases.find(r=>r.tag_name===transferTag&&r.draft);
-  if(!transfer)throw Error('Stage the CI artifact in a same-repository draft review transfer first.');
-  const matching=transfer.assets.filter(a=>a.name==='review-site.zip'&&a.state==='uploaded'&&a.digest===asset.digest);
-  if(transfer.assets.length!==1||matching.length!==1)throw Error('Review transfer must contain the exact source CI archive.');
-  downloadURL=matching[0].url;downloadHeaders={...headers,Accept:'application/octet-stream'};
+  const comparison=await api('compare/'+transferCommit+'...main',betaRepository);
+  if(!['ahead','identical'].includes(comparison.status))throw Error('Transfer commit must be reviewed and merged into beta main.');
+  downloadURL='https://raw.githubusercontent.com/'+betaRepository+'/'+transferCommit+'/review/review-site.zip';
+  downloadHeaders={};
 }
 const response=await fetch(downloadURL,{headers:downloadHeaders,signal:AbortSignal.timeout(60000)});if(!response.ok)throw Error('Preview download returned '+response.status);
 const chunks=[];let size=0;for await(const chunk of response.body){size+=chunk.length;if(size>12000000)throw Error('Preview exceeds limit.');chunks.push(chunk);}
