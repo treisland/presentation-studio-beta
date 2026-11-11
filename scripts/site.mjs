@@ -29,6 +29,11 @@ export function noDowngrade(current,next){
   const parse=v=>{const m=/^(\d+)\.(\d+)\.(\d+)(?:-(alpha|beta|rc)\.(\d+))?$/.exec(v);if(!m)throw Error('Invalid deployed version.');return [+m[1],+m[2],+m[3],m[4]?{alpha:0,beta:1,rc:2}[m[4]]:3,+(m[5]||0)];};
   const a=parse(current),b=parse(next);for(let i=0;i<a.length;i++){if(b[i]<a[i])throw Error('Channel downgrade refused; rollback requires a reviewed compatibility procedure.');if(b[i]>a[i])return;}
 }
+export function previousDeployment(old,next,channel){
+  if(channel==='beta'&&old.review===true&&old.channel==='review')return;
+  noDowngrade(old.version,next.version);
+  if(old.version===next.version&&old.commit!==next.commit)throw Error('Conflicting same-version deployment.');
+}
 async function api(path){const r=await fetch('https://api.github.com/repos/'+repository+'/'+path,{headers:{Accept:'application/vnd.github+json',...(process.env.GH_TOKEN?{Authorization:'Bearer '+process.env.GH_TOKEN}:{})},signal:AbortSignal.timeout(30000)});if(!r.ok)throw Error('GitHub API '+r.status+' for '+path);return r.json();}
 async function content(path,sha){const file=await api('contents/'+path+'?ref='+sha);return JSON.parse(Buffer.from(file.content,'base64').toString());}
 async function bytes(asset){
@@ -69,7 +74,7 @@ async function main(){
   }else if(mode==='release'){
     const payload=await publishedPayload(tag,channel,target);
     const url=process.env.CURRENT_SITE_URL;
-    if(url){if(!['https://pres-studio.com/','https://beta.pres-studio.com/'].includes(url))throw Error('Unexpected deployment origin.');const r=await fetch(new URL('distribution.json',url),{signal:AbortSignal.timeout(15000)});if(r.ok){const old=await r.json();noDowngrade(old.version,payload.info.version);if(old.version===payload.info.version&&old.commit!==payload.info.commit)throw Error('Conflicting same-version deployment.');}else if(r.status!==404)throw Error('Cannot verify current channel version.');}
+    if(url){if(!['https://pres-studio.com/','https://beta.pres-studio.com/'].includes(url))throw Error('Unexpected deployment origin.');const r=await fetch(new URL('distribution.json',url),{signal:AbortSignal.timeout(15000)});if(r.ok)previousDeployment(await r.json(),payload.info,channel);else if(r.status!==404)throw Error('Cannot verify current channel version.');}
     await writeSite('site',payload);
   }else throw Error('Usage: node scripts/site.mjs local | release vVERSION stable|beta');
 }
